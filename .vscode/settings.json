@@ -1,0 +1,6 @@
+{
+  "terminal.integrated.env.windows": {
+    "AZURE_CONFIG_DIR": "${env:USERPROFILE}\\.azure-runlog",
+    "AZD_CONFIG_DIR": "${env:USERPROFILE}\\.azd-runlog"
+  }
+}

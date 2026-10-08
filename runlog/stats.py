@@ -2,7 +2,8 @@
 from collections import Counter
 from datetime import date, timedelta
 
-from runlog.runs import VALID_UNITS, RunValidationError, format_pace
+from runlog.runs import VALID_UNITS, VALID_RUN_TYPES, RunValidationError, format_pace
+
 
 
 def parse_unit(value) -> str:
@@ -94,3 +95,71 @@ def summarize_week(runs: list[dict], any_day: date, unit: str) -> dict:
         "runsByType": dict(Counter(run["runType"] for run in in_week)),
     })
     return summary
+
+def parse_weeks(value, default: int = 8, maximum: int = 52) -> int:
+    """Return how many weeks to look back (default 8, max 52)."""
+    if value is None:
+        return default
+    try:
+        weeks = int(value)
+    except (TypeError, ValueError):
+        raise RunValidationError("Weeks must be a whole number.") from None
+    if not 1 <= weeks <= maximum:
+        raise RunValidationError(f"Weeks must be between 1 and {maximum}.")
+    return weeks
+
+
+def parse_run_type(value) -> str | None:
+    """Return a valid run type, or None to include all runs."""
+    if not value:
+        return None
+    run_type = str(value).lower()
+    if run_type not in VALID_RUN_TYPES:
+        raise RunValidationError(
+            f"Run type '{value}' must be one of: {', '.join(sorted(VALID_RUN_TYPES))}."
+        )
+    return run_type
+
+
+def pace_seconds(total_seconds: int, total_meters: int, unit: str) -> int:
+    """Seconds per mile or km."""
+    return round(total_seconds / (total_meters / VALID_UNITS[unit]))
+
+
+def build_pace_trend(runs: list[dict], weeks: int, end_day: date, unit: str,
+                     run_type: str | None = None) -> dict:
+    """Average pace per week for the last `weeks` weeks, oldest first."""
+    if run_type:
+        runs = [run for run in runs if run["runType"] == run_type]
+
+    current_week_start, _ = week_bounds(end_day)
+    trend = []
+    for offset in range(weeks - 1, -1, -1):
+        start = current_week_start - timedelta(weeks=offset)
+        end = start + timedelta(days=6)
+        in_week = [run for run in runs if start <= date.fromisoformat(run["date"]) <= end]
+
+        entry = {"weekStart": start.isoformat(), "runCount": len(in_week)}
+        if in_week:
+            total_meters = sum(run["distanceMeters"] for run in in_week)
+            total_seconds = sum(run["durationSeconds"] for run in in_week)
+            entry["distance"] = round(total_meters / VALID_UNITS[unit], 2)
+            entry["averagePace"] = format_pace(total_seconds, total_meters, unit)
+            entry["paceSeconds"] = pace_seconds(total_seconds, total_meters, unit)
+        trend.append(entry)
+
+    result = {"unit": unit, "runType": run_type or "all", "weeks": trend}
+
+    weeks_with_runs = [week for week in trend if week["runCount"]]
+    if len(weeks_with_runs) >= 2:
+        first, last = weeks_with_runs[0], weeks_with_runs[-1]
+        change = last["paceSeconds"] - first["paceSeconds"]
+        if change == 0:
+            result["change"] = "no change"
+        else:
+            direction = "faster" if change < 0 else "slower"
+            result["change"] = (
+                f"{format_duration(abs(change))} per {unit} {direction} "
+                f"(week of {first['weekStart']} vs week of {last['weekStart']})"
+            )
+    return result

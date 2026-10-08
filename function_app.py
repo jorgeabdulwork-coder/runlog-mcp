@@ -5,7 +5,7 @@ import azure.functions as func
 
 from runlog.runs import VALID_UNITS, RunValidationError, build_run, format_pace
 from runlog.store import InMemoryRunStore
-from runlog.stats import parse_day, parse_limit, parse_unit, recent_runs, summarize_week
+from runlog.stats import  build_pace_trend, parse_day, parse_limit, parse_run_type, parse_unit, parse_weeks, recent_runs, summarize_week
 
 
 app = func.FunctionApp()
@@ -119,3 +119,34 @@ def weekly_summary(context) -> str:
 
     summary = summarize_week(store.list_for_user(USER_ID), day, unit)
     return json.dumps(summary, indent=2)
+
+PACE_TREND_PROPERTIES = json.dumps([
+    {"propertyName": "weeks", "propertyType": "integer",
+     "description": "How many weeks to look back, including the current week. Defaults to 8, max 52."},
+    {"propertyName": "run_type", "propertyType": "string",
+     "description": "Only include one type: easy, tempo, long, or race. Defaults to all runs."},
+    {"propertyName": "unit", "propertyType": "string",
+     "description": "'mi' or 'km'. Defaults to 'mi'."},
+])
+
+
+@app.mcp_tool_trigger(
+    arg_name="context",
+    tool_name="pace_trend",
+    description=(
+        "Show average pace per week over recent weeks (oldest first) and whether pace "
+        "is getting faster or slower. Filter by run type to compare like with like."
+    ),
+    tool_properties=PACE_TREND_PROPERTIES,
+)
+def pace_trend(context) -> str:
+    args = json.loads(context).get("arguments", {})
+    try:
+        unit = parse_unit(args.get("unit"))
+        weeks = parse_weeks(args.get("weeks"))
+        run_type = parse_run_type(args.get("run_type"))
+    except RunValidationError as err:
+        return f"Could not build pace trend: {err}"
+
+    trend = build_pace_trend(store.list_for_user(USER_ID), weeks, parse_day(None), unit, run_type)
+    return json.dumps(trend, indent=2)

@@ -5,6 +5,8 @@ import azure.functions as func
 
 from runlog.runs import VALID_UNITS, RunValidationError, build_run, format_pace
 from runlog.store import InMemoryRunStore
+from runlog.stats import parse_day, parse_limit, parse_unit, recent_runs, summarize_week
+
 
 app = func.FunctionApp()
 store = InMemoryRunStore()
@@ -64,3 +66,56 @@ def log_run(context) -> str:
         f"Logged a {distance:.2f} {unit} {run['runType']} run on {run['date']} "
         f"at {pace} pace (id: {run['id']})."
     )
+
+GET_RECENT_RUNS_PROPERTIES = json.dumps([
+    {"propertyName": "limit", "propertyType": "integer",
+     "description": "How many runs to return, newest first. Defaults to 5, max 50."},
+    {"propertyName": "unit", "propertyType": "string",
+     "description": "'mi' or 'km' for distances and pace. Defaults to 'mi'."},
+])
+
+
+@app.mcp_tool_trigger(
+    arg_name="context",
+    tool_name="get_recent_runs",
+    description="List the most recently logged runs, newest first, with distance, duration, and pace.",
+    tool_properties=GET_RECENT_RUNS_PROPERTIES,
+)
+def get_recent_runs(context) -> str:
+    args = json.loads(context).get("arguments", {})
+    try:
+        unit = parse_unit(args.get("unit"))
+        limit = parse_limit(args.get("limit"))
+    except RunValidationError as err:
+        return f"Could not get runs: {err}"
+
+    runs = recent_runs(store.list_for_user(USER_ID), limit, unit)
+    if not runs:
+        return "No runs logged yet."
+    return json.dumps(runs, indent=2)
+
+
+WEEKLY_SUMMARY_PROPERTIES = json.dumps([
+    {"propertyName": "week_of", "propertyType": "string",
+     "description": "Any date (YYYY-MM-DD) in the week to summarize. Weeks run Monday to Sunday. Defaults to today."},
+    {"propertyName": "unit", "propertyType": "string",
+     "description": "'mi' or 'km'. Defaults to 'mi'."},
+])
+
+
+@app.mcp_tool_trigger(
+    arg_name="context",
+    tool_name="weekly_summary",
+    description="Summarize one week of running: total distance, total time, average pace, longest run, and runs by type.",
+    tool_properties=WEEKLY_SUMMARY_PROPERTIES,
+)
+def weekly_summary(context) -> str:
+    args = json.loads(context).get("arguments", {})
+    try:
+        unit = parse_unit(args.get("unit"))
+        day = parse_day(args.get("week_of"))
+    except RunValidationError as err:
+        return f"Could not build summary: {err}"
+
+    summary = summarize_week(store.list_for_user(USER_ID), day, unit)
+    return json.dumps(summary, indent=2)

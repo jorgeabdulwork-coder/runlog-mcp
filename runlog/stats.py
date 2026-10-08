@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 from runlog.runs import VALID_UNITS, VALID_RUN_TYPES, RunValidationError, format_pace
 
+from statistics import linear_regression
+
 
 
 def parse_unit(value) -> str:
@@ -162,4 +164,14 @@ def build_pace_trend(runs: list[dict], weeks: int, end_day: date, unit: str,
                 f"{format_duration(abs(change))} per {unit} {direction} "
                 f"(week of {first['weekStart']} vs week of {last['weekStart']})"
             )
+        # Slope across every week with runs, so one unusual week can't flip the result
+        positions = [i for i, week in enumerate(trend) if week["runCount"]]
+        paces = [week["paceSeconds"] for week in weeks_with_runs]
+        slope, _ = linear_regression(positions, paces)
+        per_week = round(slope)
+        if per_week == 0:
+            result["trendPerWeek"] = "steady"
+        else:
+            direction = "faster" if per_week < 0 else "slower"
+            result["trendPerWeek"] = f"{abs(per_week)} sec per {unit} {direction} per week"
     return result

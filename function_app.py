@@ -4,12 +4,13 @@ import logging
 import azure.functions as func
 
 from runlog.runs import VALID_UNITS, RunValidationError, build_run, format_pace
-from runlog.store import InMemoryRunStore
+from runlog.store import create_store
 from runlog.stats import  build_pace_trend, parse_day, parse_limit, parse_run_type, parse_unit, parse_weeks, recent_runs, summarize_week
 
 
+
 app = func.FunctionApp()
-store = InMemoryRunStore()
+store = create_store()
 USER_ID = "jorge"  # single user for now; real auth comes in Phase 5
 
 
